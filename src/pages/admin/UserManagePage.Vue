@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, SearchOutlined, ReloadOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import {
   listUserVoByPage,
   addUser,
@@ -200,7 +200,7 @@ const handleDelete = (record: API.UserVO) => {
     okType: 'danger',
     onOk: async () => {
       try {
-        const res = await deleteUser({ id: record.id })
+        const res = await deleteUser({ id: String(record.id) })
         if (res.data.code === 0) {
           message.success('删除成功')
           loadData()
@@ -368,12 +368,16 @@ onMounted(() => {
             <!-- 操作列 -->
             <template v-if="column.key === 'action'">
               <a-space>
-                <a-button type="link" size="small" @click="handleEdit(record)">
-                  编辑
-                </a-button>
-                <a-button type="link" size="small" danger @click="handleDelete(record)">
-                  删除
-                </a-button>
+                <a-tooltip title="编辑">
+                  <a-button type="text" size="small" @click="handleEdit(record)">
+                    <template #icon><EditOutlined /></template>
+                  </a-button>
+                </a-tooltip>
+                <a-tooltip title="删除">
+                  <a-button type="text" size="small" danger @click="handleDelete(record)">
+                    <template #icon><DeleteOutlined /></template>
+                  </a-button>
+                </a-tooltip>
               </a-space>
             </template>
           </template>

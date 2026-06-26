@@ -4,6 +4,9 @@ import HomePage from '../pages/HomePage.vue'
 import UserLoginPage from '../pages/user/UserLoginPage.vue'
 import UserRegisterPage from '../pages/user/UserRegisterPage.vue'
 import UserManagePage from '../pages/admin/UserManagePage.vue'
+import AppManagePage from '../pages/admin/AppManagePage.vue'
+import AppChatPage from '../pages/app/AppChatPage.vue'
+import AppEditPage from '../pages/app/AppEditPage.vue'
 import NotFoundPage from '../pages/NotFoundPage.vue'
 import { useLoginUserStore } from '@/stores/loginUser'
 
@@ -26,9 +29,27 @@ const router = createRouter({
       component: UserRegisterPage,
     },
     {
+      path: '/app/chat/:id',
+      name: '应用对话',
+      component: AppChatPage,
+      meta: { requiresAuth: true, hideLayout: true },
+    },
+    {
+      path: '/app/edit/:id',
+      name: '应用编辑',
+      component: AppEditPage,
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/admin/userManage',
       name: '用户管理',
       component: UserManagePage,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/appManage',
+      name: '应用管理',
+      component: AppManagePage,
       meta: { requiresAuth: true, requiresAdmin: true },
     },
     {

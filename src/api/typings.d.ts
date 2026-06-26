@@ -1,7 +1,7 @@
 declare namespace API {
   type adminGetAppVOParams = {
     /** 应用 id */
-    id: number
+    id: string
   }
 
   type AppAddRequest = {
@@ -13,7 +13,7 @@ declare namespace API {
 
   type AppAdminUpdateRequest = {
     /** 应用 id */
-    id: number
+    id: string
     /** 应用名称 */
     appName?: string
     /** 应用封面 URL */
@@ -24,7 +24,7 @@ declare namespace API {
 
   type AppDeployRequest = {
     /** 应用 ID */
-    appId: number
+    appId: string
   }
 
   type AppQueryRequest = {
@@ -37,7 +37,7 @@ declare namespace API {
     /** 排序顺序 */
     sortOrder?: 'ascend' | 'descend'
     /** 应用 id */
-    id?: number
+    id?: string
     /** 应用名称，支持模糊查询 */
     appName?: string
     /** 代码生成类型 */
@@ -52,13 +52,13 @@ declare namespace API {
 
   type AppUpdateRequest = {
     /** 应用 id */
-    id: number
+    id: string
     /** 应用名称 */
     appName?: string
   }
 
   type AppVO = {
-    id?: number
+    id?: string
     appName?: string
     cover?: string
     initPrompt?: string
@@ -92,7 +92,7 @@ declare namespace API {
 
   type BaseResponseLong = {
     code?: number
-    data?: number
+    data?: string
     message?: string
   }
 
@@ -128,18 +128,18 @@ declare namespace API {
 
   type chatToGenCodeParams = {
     /** 应用 ID */
-    appId: number
+    appId: string
     /** 用户提示词 */
     message: string
   }
 
   type DeleteRequest = {
-    id?: number
+    id?: string
   }
 
   type getAppVOByIdParams = {
     /** 应用 id */
-    id: number
+    id: string
   }
 
   type getUserByIdParams = {

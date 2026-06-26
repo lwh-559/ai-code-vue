@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import GlobalHeader from '@/components/GlobalHeader.vue'
 import GlobalFooter from '@/components/GlobalFooter.vue'
+
+const route = useRoute()
+
+// 对话页隐藏 Header 和 Footer
+const hideLayout = computed(() => route.meta.hideLayout === true)
 </script>
 
 <template>
-  <a-layout class="basic-layout">
+  <a-layout v-if="!hideLayout" class="basic-layout">
     <a-layout-header class="layout-header">
       <GlobalHeader />
     </a-layout-header>
@@ -15,6 +22,7 @@ import GlobalFooter from '@/components/GlobalFooter.vue'
       <GlobalFooter />
     </a-layout-footer>
   </a-layout>
+  <router-view v-else />
 </template>
 
 <style scoped>

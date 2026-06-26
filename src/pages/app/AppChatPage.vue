@@ -1,0 +1,619 @@
+<script setup lang="ts">
+import { ref, reactive, onMounted, onUnmounted, nextTick, computed, h } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { message, Modal } from 'ant-design-vue'
+import {
+  ArrowLeftOutlined,
+  SendOutlined,
+  LoadingOutlined,
+  RocketOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons-vue'
+import { getAppVoById, deployApp } from '@/api/appController'
+import { chatToGenCode } from '@/utils/sseRequest'
+import { useLoginUserStore } from '@/stores/loginUser'
+import { getStaticPreviewUrl } from '@/utils/url'
+import { marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github.css'
+import AppDetailPopover from '@/components/app/AppDetailPopover.vue'
+
+// 配置 marked：GFM + 换行 + 代码高亮
+marked.use(
+  markedHighlight({
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang }).value
+      }
+      return hljs.highlightAuto(code).value
+    },
+  }),
+)
+marked.use({ breaks: true, gfm: true })
+
+const router = useRouter()
+const route = useRoute()
+const loginUserStore = useLoginUserStore()
+
+const appId = computed(() => route.params.id as string)
+const isViewOnly = computed(() => route.query.view === '1')
+const isOwner = computed(() => {
+  if (!loginUserStore.loginUser?.id || !appInfo.value.userId) return false
+  return loginUserStore.loginUser.id === appInfo.value.userId
+})
+
+// ========== 应用信息 ==========
+const appInfo = ref<API.AppVO>({})
+const loadingApp = ref(false)
+
+// ========== 对话相关 ==========
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+const messages = ref<ChatMessage[]>([])
+const userInput = ref('')
+const sending = ref(false)
+const sseController = ref<AbortController | null>(null)
+const messagesEndRef = ref<HTMLElement>()
+
+// ========== 预览相关 ==========
+const previewUrl = ref('')
+const showPreview = ref(false)
+
+// ========== 部署相关 ==========
+const deploying = ref(false)
+
+/**
+ * 滚动到底部
+ */
+const scrollToBottom = () => {
+  nextTick(() => {
+    messagesEndRef.value?.scrollIntoView({ behavior: 'smooth' })
+  })
+}
+
+/**
+ * 加载应用信息
+ * @param redirectOnError 失败时是否跳转首页
+ */
+const loadAppInfo = async (redirectOnError = true) => {
+  loadingApp.value = true
+  try {
+    const res = await getAppVoById({ id: appId.value } as any)
+    if (res.data.code === 0 && res.data.data) {
+      appInfo.value = res.data.data
+    } else if (redirectOnError) {
+      message.error('获取应用信息失败')
+      router.push('/')
+    }
+  } catch (error) {
+    if (redirectOnError) {
+      message.error('获取应用信息失败')
+      router.push('/')
+    }
+  } finally {
+    loadingApp.value = false
+  }
+}
+
+/**
+ * 发送消息给 AI
+ */
+const sendMessage = async (text?: string) => {
+  const msg = (text || userInput.value).trim()
+  if (!msg || sending.value) return
+
+  // 添加用户消息
+  messages.value.push({ role: 'user', content: msg })
+  userInput.value = ''
+  scrollToBottom()
+
+  // 添加 AI 占位消息
+  messages.value.push({ role: 'assistant', content: '' })
+  sending.value = true
+  scrollToBottom()
+
+  // 调用 SSE 接口
+  sseController.value = chatToGenCode(
+    appId.value,
+    msg,
+    // onMessage
+    (data: string) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.content += data
+        scrollToBottom()
+      }
+    },
+    // onDone
+    async () => {
+      sending.value = false
+      sseController.value = null
+      // 流结束后重新获取应用信息，确保有 codeGenType
+      await loadAppInfo(false)
+      updatePreviewUrl()
+      scrollToBottom()
+    },
+    // onError
+    (error: Error) => {
+      sending.value = false
+      sseController.value = null
+      // 将错误信息显示在对话框中
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.content = `❌ 错误：${error.message}`
+      } else {
+        messages.value.push({ role: 'assistant', content: `❌ 错误：${error.message}` })
+      }
+      scrollToBottom()
+    },
+  )
+}
+
+/**
+ * 更新预览 URL
+ */
+const updatePreviewUrl = () => {
+  console.log('updatePreviewUrl called, appInfo:', appInfo.value)
+  if (appInfo.value.codeGenType && appInfo.value.id) {
+    const codeGenType = appInfo.value.codeGenType
+    const id = appInfo.value.id
+    // 尝试不同的 URL 格式
+    previewUrl.value = getStaticPreviewUrl(codeGenType, id)
+    showPreview.value = true
+    console.log('previewUrl set to:', previewUrl.value)
+  }
+}
+
+/**
+ * 删除应用
+ */
+const handleDelete = () => {
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除应用「${appInfo.value.appName}」吗？删除后无法恢复。`,
+    okText: '确认删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      try {
+        const { deleteApp } = await import('@/api/appController')
+        const res = await deleteApp({ id: appId.value } as any)
+        if (res.data.code === 0) {
+          message.success('删除成功')
+          router.push('/')
+        } else {
+          message.error('删除失败：' + (res.data.message || '未知错误'))
+        }
+      } catch (error) {
+        message.error('删除失败，请稍后重试')
+      }
+    },
+  })
+}
+
+/**
+ * 跳转到编辑页
+ */
+const goToEdit = () => {
+  router.push(`/app/edit/${appId.value}`)
+}
+
+/**
+ * 部署应用
+ */
+const handleDeploy = async () => {
+  deploying.value = true
+  try {
+    const res = await deployApp({ appId: appId.value } as any)
+    if (res.data.code === 0 && res.data.data) {
+      Modal.success({
+        title: '部署成功',
+        content: h('div', [
+          '应用已部署，访问地址：',
+          h('a', { href: res.data.data, target: '_blank', style: 'color: #1890ff' }, res.data.data),
+        ]),
+        okText: '我知道了',
+      })
+    } else {
+      message.error('部署失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error) {
+    message.error('部署失败，请稍后重试')
+  } finally {
+    deploying.value = false
+  }
+}
+
+/**
+ * 返回主页
+ */
+const goBack = () => {
+  router.push('/')
+}
+
+/**
+ * 渲染 markdown 为 HTML
+ */
+const renderMarkdown = (text: string): string => {
+  return marked.parse(text) as string
+}
+
+onMounted(async () => {
+  await loadAppInfo()
+  // 查看模式下，如果已有代码生成类型，直接显示预览
+  if (isViewOnly.value) {
+    updatePreviewUrl()
+  }
+  // 如果有初始提示词且不是查看模式，自动发送
+  if (appInfo.value.initPrompt && messages.value.length === 0 && !isViewOnly.value) {
+    await sendMessage(appInfo.value.initPrompt)
+  }
+})
+
+onUnmounted(() => {
+  // 取消进行中的 SSE 请求
+  sseController.value?.abort()
+})
+</script>
+
+<template>
+  <div class="chat-page">
+    <!-- 顶部栏 -->
+    <div class="chat-header">
+      <div class="header-left">
+        <a-button type="text" @click="goBack">
+          <template #icon><ArrowLeftOutlined /></template>
+        </a-button>
+        <span class="app-name">{{ appInfo.appName || '应用生成中...' }}</span>
+      </div>
+      <div class="header-right">
+        <!-- 应用详情按钮 -->
+        <a-popover placement="bottomRight" trigger="click">
+          <template #content>
+            <AppDetailPopover
+              :app="appInfo"
+              :is-owner="isOwner"
+              @edit="goToEdit"
+              @delete="handleDelete"
+            />
+          </template>
+          <a-button>
+            <template #icon><InfoCircleOutlined /></template>
+            应用详情
+          </a-button>
+        </a-popover>
+
+        <a-button
+          type="primary"
+          :loading="deploying"
+          @click="handleDeploy"
+        >
+          <template #icon><RocketOutlined /></template>
+          部署
+        </a-button>
+      </div>
+    </div>
+
+    <!-- 核心内容区域 -->
+    <div class="chat-body">
+      <!-- 左侧对话区域 -->
+      <div class="chat-left">
+        <div class="messages-container">
+          <a-spin :spinning="loadingApp" tip="加载应用信息...">
+            <div v-if="messages.length === 0 && !loadingApp" class="empty-chat">
+              <div class="empty-icon">💬</div>
+              <p>开始与 AI 对话来生成你的应用</p>
+            </div>
+
+            <div
+              v-for="(msg, index) in messages"
+              :key="index"
+              class="message"
+              :class="msg.role"
+            >
+              <div v-if="msg.role === 'user'" class="message-content user-message">
+                {{ msg.content }}
+              </div>
+              <div v-else class="message-content assistant-message">
+                <div v-if="msg.content" v-html="renderMarkdown(msg.content)"></div>
+                <div v-else-if="sending && index === messages.length - 1" class="typing-indicator">
+                  <LoadingOutlined /> AI 正在思考...
+                </div>
+              </div>
+            </div>
+          </a-spin>
+          <div ref="messagesEndRef" />
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="input-area">
+          <a-tooltip :title="!isOwner ? '无法在别人的作品下对话哦~' : ''" :disabled="isOwner">
+            <a-input-search
+              v-model:value="userInput"
+              :placeholder="isOwner ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'"
+              enter-button
+              :loading="sending"
+              :disabled="!isOwner"
+              size="large"
+              class="chat-input"
+              @search="isOwner && sendMessage()"
+            >
+              <template #enterButton>
+                <a-button type="primary" :disabled="sending || !isOwner">
+                  <template #icon><SendOutlined /></template>
+                </a-button>
+              </template>
+            </a-input-search>
+          </a-tooltip>
+          <div v-if="isOwner" class="input-tip">按 Enter 发送，Ctrl+Enter 换行</div>
+          <div v-else class="input-tip input-tip-warning">只有作品作者才能进行对话</div>
+        </div>
+      </div>
+
+      <!-- 右侧预览区域 -->
+      <div class="chat-right">
+        <div v-if="showPreview && previewUrl" class="preview-container">
+          <iframe
+            :src="previewUrl"
+            class="preview-iframe"
+            sandbox="allow-scripts allow-same-origin"
+          />
+        </div>
+        <div v-else class="preview-empty">
+          <div class="preview-empty-icon">🖥️</div>
+          <p>AI 生成完成后将在此展示网页预览</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.chat-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f5f5;
+}
+
+/* 顶部栏 */
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 12px;
+  height: 48px;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-name {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 核心内容区域 */
+.chat-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 左侧对话区域 */
+.chat-left {
+  flex: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.empty-chat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-top: 40px;
+  color: #999;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.message {
+  margin-bottom: 12px;
+  display: flex;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.message.assistant {
+  justify-content: flex-start;
+}
+
+.message-content {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.user-message {
+  background: #1890ff;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.assistant-message {
+  background: #fff;
+  color: #333;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.assistant-message :deep(pre) {
+  background: #f6f8fa;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.assistant-message :deep(code) {
+  background: #f0f0f0;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.assistant-message :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.assistant-message :deep(h1),
+.assistant-message :deep(h2),
+.assistant-message :deep(h3),
+.assistant-message :deep(h4) {
+  margin: 12px 0 6px;
+  line-height: 1.4;
+}
+
+.assistant-message :deep(h1) { font-size: 20px; }
+.assistant-message :deep(h2) { font-size: 17px; }
+.assistant-message :deep(h3) { font-size: 15px; }
+
+.assistant-message :deep(p) {
+  margin: 6px 0;
+}
+
+.assistant-message :deep(ul),
+.assistant-message :deep(ol) {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.assistant-message :deep(li) {
+  margin: 2px 0;
+}
+
+.assistant-message :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.assistant-message :deep(th),
+.assistant-message :deep(td) {
+  border: 1px solid #ddd;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.assistant-message :deep(th) {
+  background: #f6f8fa;
+  font-weight: 600;
+}
+
+.assistant-message :deep(blockquote) {
+  border-left: 3px solid #ddd;
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: #666;
+}
+
+.typing-indicator {
+  color: #999;
+  font-size: 13px;
+}
+
+/* 输入区域 */
+.input-area {
+  padding: 8px 12px;
+  background: #fff;
+  border-top: 1px solid #e8e8e8;
+}
+
+.chat-input :deep(.ant-input-search-button) {
+  height: 40px;
+}
+
+.input-tip {
+  font-size: 12px;
+  color: #999;
+  margin-top: 6px;
+  text-align: right;
+}
+
+.input-tip-warning {
+  color: #ff7875;
+}
+
+/* 右侧预览区域 */
+.chat-right {
+  flex: 3;
+  border-left: 1px solid #e8e8e8;
+  background: #fff;
+}
+
+.preview-container {
+  width: 100%;
+  height: 100%;
+}
+
+.preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+}
+
+.preview-empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+</style>
