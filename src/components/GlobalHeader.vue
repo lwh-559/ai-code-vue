@@ -24,6 +24,11 @@ const originItems = [
     title: '应用管理',
   },
   {
+    key: '/admin/chatManage',
+    label: '对话管理',
+    title: '对话管理',
+  },
+  {
     key: '/admin/userManage',
     label: '用户管理',
     title: '用户管理',

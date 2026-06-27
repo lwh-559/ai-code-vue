@@ -4,7 +4,7 @@ import request from '@/request'
 
 /** 创建应用 用户创建新的应用，需要登录 POST /app/add */
 export async function addApp(body: API.AppAddRequest, options?: { [key: string]: any }) {
-  return request<API.BaseResponseLong>('/app/add', {
+  return request<API.BaseResponseString>('/app/add', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

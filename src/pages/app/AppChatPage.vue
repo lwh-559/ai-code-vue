@@ -10,6 +10,7 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp } from '@/api/appController'
+import { listAppChatHistory } from '@/api/chatHistoryController'
 import { chatToGenCode } from '@/utils/sseRequest'
 import { useLoginUserStore } from '@/stores/loginUser'
 import { getStaticPreviewUrl } from '@/utils/url'
@@ -38,7 +39,6 @@ const route = useRoute()
 const loginUserStore = useLoginUserStore()
 
 const appId = computed(() => route.params.id as string)
-const isViewOnly = computed(() => route.query.view === '1')
 const isOwner = computed(() => {
   if (!loginUserStore.loginUser?.id || !appInfo.value.userId) return false
   return loginUserStore.loginUser.id === appInfo.value.userId
@@ -50,8 +50,10 @@ const loadingApp = ref(false)
 
 // ========== 对话相关 ==========
 interface ChatMessage {
+  id?: string
   role: 'user' | 'assistant'
   content: string
+  createTime?: string
 }
 
 const messages = ref<ChatMessage[]>([])
@@ -60,9 +62,16 @@ const sending = ref(false)
 const sseController = ref<AbortController | null>(null)
 const messagesEndRef = ref<HTMLElement>()
 
+// ========== 历史消息分页相关 ==========
+const loadingHistory = ref(false)
+const hasMoreHistory = ref(false)
+const lastCreateTime = ref<string | undefined>(undefined)
+const PAGE_SIZE = 10
+
 // ========== 预览相关 ==========
+type PreviewStatus = 'not_generated' | 'preview_ready' | 'preview_error'
+const previewStatus = ref<PreviewStatus>('not_generated')
 const previewUrl = ref('')
-const showPreview = ref(false)
 
 // ========== 部署相关 ==========
 const deploying = ref(false)
@@ -74,6 +83,63 @@ const scrollToBottom = () => {
   nextTick(() => {
     messagesEndRef.value?.scrollIntoView({ behavior: 'smooth' })
   })
+}
+
+/**
+ * 加载对话历史消息（游标分页）
+ */
+const loadChatHistory = async (isLoadMore = false) => {
+  if (loadingHistory.value) return
+
+  loadingHistory.value = true
+  try {
+    const params: any = {
+      appId: appId.value,
+      pageSize: PAGE_SIZE,
+    }
+
+    // 如果是加载更多，传入游标
+    if (isLoadMore && lastCreateTime.value) {
+      params.lastCreateTime = lastCreateTime.value
+    }
+
+    const res = await listAppChatHistory(params)
+    if (res.data.code === 0 && res.data.data) {
+      const records = res.data.data.records || []
+
+      // 将历史记录转换为 ChatMessage 格式
+      const historyMessages: ChatMessage[] = records.map((record) => ({
+        id: String(record.id),
+        role: record.messageType === 'user' ? 'user' : 'assistant',
+        content: record.message || '',
+        createTime: record.createTime,
+      }))
+
+      if (isLoadMore) {
+        // 加载更多：将新消息插入到现有消息的前面
+        messages.value = [...historyMessages, ...messages.value]
+      } else {
+        // 首次加载：反转为倒序（最新的在底部）
+        messages.value = historyMessages.reverse()
+      }
+
+      // 更新游标（取最后一条记录的创建时间）
+      const lastRecord = records[records.length - 1]
+      if (lastRecord && lastRecord.createTime) {
+        lastCreateTime.value = lastRecord.createTime
+      }
+
+      // 判断是否还有更多数据
+      const totalRow = res.data.data.totalRow || 0
+      hasMoreHistory.value = messages.value.length < totalRow
+    } else {
+      message.error('加载对话历史失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error) {
+    message.error('加载对话历史失败，请稍后重试')
+  } finally {
+    loadingHistory.value = false
+  }
 }
 
 /**
@@ -135,8 +201,11 @@ const sendMessage = async (text?: string) => {
       sseController.value = null
       // 流结束后重新获取应用信息，确保有 codeGenType
       await loadAppInfo(false)
-      updatePreviewUrl()
       scrollToBottom()
+      // 延迟5秒后尝试加载预览
+      setTimeout(async () => {
+        await tryLoadPreview()
+      }, 5000)
     },
     // onError
     (error: Error) => {
@@ -155,18 +224,54 @@ const sendMessage = async (text?: string) => {
 }
 
 /**
- * 更新预览 URL
+ * 检查预览资源是否存在（不是404）
  */
-const updatePreviewUrl = () => {
-  console.log('updatePreviewUrl called, appInfo:', appInfo.value)
-  if (appInfo.value.codeGenType && appInfo.value.id) {
-    const codeGenType = appInfo.value.codeGenType
-    const id = appInfo.value.id
-    // 尝试不同的 URL 格式
-    previewUrl.value = getStaticPreviewUrl(codeGenType, id)
-    showPreview.value = true
-    console.log('previewUrl set to:', previewUrl.value)
+const checkPreviewAvailable = async (url: string): Promise<boolean> => {
+  try {
+    const res = await fetch(url)
+    return res.ok
+  } catch {
+    return false
   }
+}
+
+/**
+ * 尝试加载预览，失败重试最多3次
+ */
+const tryLoadPreview = async (retryCount = 0) => {
+  const MAX_RETRY = 3
+  if (!appInfo.value.codeGenType || !appInfo.value.id) {
+    previewStatus.value = 'not_generated'
+    return
+  }
+  const codeGenType = appInfo.value.codeGenType
+  const id = appInfo.value.id
+  const url = getStaticPreviewUrl(codeGenType, String(id))
+  const available = await checkPreviewAvailable(url)
+  if (available) {
+    previewUrl.value = url
+    previewStatus.value = 'preview_ready'
+  } else if (retryCount < MAX_RETRY) {
+    // 1秒后重试
+    setTimeout(() => {
+      tryLoadPreview(retryCount + 1)
+    }, 1000)
+  } else {
+    previewStatus.value = 'preview_error'
+  }
+}
+
+/**
+ * 初始化预览状态（页面加载时调用）
+ */
+const initPreviewStatus = async () => {
+  // 如果没有对话历史，直接显示未生成
+  if (messages.value.length === 0) {
+    previewStatus.value = 'not_generated'
+    return
+  }
+  // 有对话历史，检查预览资源是否存在
+  await tryLoadPreview()
 }
 
 /**
@@ -245,12 +350,14 @@ const renderMarkdown = (text: string): string => {
 
 onMounted(async () => {
   await loadAppInfo()
-  // 查看模式下，如果已有代码生成类型，直接显示预览
-  if (isViewOnly.value) {
-    updatePreviewUrl()
-  }
-  // 如果有初始提示词且不是查看模式，自动发送
-  if (appInfo.value.initPrompt && messages.value.length === 0 && !isViewOnly.value) {
+  // 加载对话历史
+  await loadChatHistory()
+  // 滚动到底部
+  scrollToBottom()
+  // 初始化预览状态
+  await initPreviewStatus()
+  // 如果是自己的应用且没有对话历史，自动发送初始提示词
+  if (isOwner.value && messages.value.length === 0 && appInfo.value.initPrompt) {
     await sendMessage(appInfo.value.initPrompt)
   }
 })
@@ -304,15 +411,26 @@ onUnmounted(() => {
       <!-- 左侧对话区域 -->
       <div class="chat-left">
         <div class="messages-container">
-          <a-spin :spinning="loadingApp" tip="加载应用信息...">
-            <div v-if="messages.length === 0 && !loadingApp" class="empty-chat">
+          <a-spin :spinning="loadingApp || loadingHistory" tip="加载中...">
+            <!-- 加载更多按钮 -->
+            <div v-if="hasMoreHistory" class="load-more-container">
+              <a-button
+                type="link"
+                :loading="loadingHistory"
+                @click="loadChatHistory(true)"
+              >
+                加载更多历史消息
+              </a-button>
+            </div>
+
+            <div v-if="messages.length === 0 && !loadingApp && !loadingHistory" class="empty-chat">
               <div class="empty-icon">💬</div>
               <p>开始与 AI 对话来生成你的应用</p>
             </div>
 
             <div
               v-for="(msg, index) in messages"
-              :key="index"
+              :key="msg.id || index"
               class="message"
               :class="msg.role"
             >
@@ -357,15 +475,22 @@ onUnmounted(() => {
 
       <!-- 右侧预览区域 -->
       <div class="chat-right">
-        <div v-if="showPreview && previewUrl" class="preview-container">
+        <!-- 预览就绪：显示 iframe -->
+        <div v-if="previewStatus === 'preview_ready' && previewUrl" class="preview-container">
           <iframe
             :src="previewUrl"
             class="preview-iframe"
             sandbox="allow-scripts allow-same-origin"
           />
         </div>
-        <div v-else class="preview-empty">
-          <div class="preview-empty-icon">🖥️</div>
+        <!-- 预览失败 -->
+        <div v-else-if="previewStatus === 'preview_error'" class="preview-error">
+          <div class="preview-error-icon">⚠️</div>
+          <p>预览出现问题</p>
+        </div>
+        <!-- 未生成 -->
+        <div v-else class="preview-not-generated">
+          <div class="preview-not-generated-icon">🖥️</div>
           <p>AI 生成完成后将在此展示网页预览</p>
         </div>
       </div>
@@ -434,6 +559,12 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+}
+
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
 }
 
 .empty-chat {
@@ -603,7 +734,7 @@ onUnmounted(() => {
   border: none;
 }
 
-.preview-empty {
+.preview-not-generated {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -612,7 +743,21 @@ onUnmounted(() => {
   color: #999;
 }
 
-.preview-empty-icon {
+.preview-not-generated-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #ff4d4f;
+}
+
+.preview-error-icon {
   font-size: 48px;
   margin-bottom: 16px;
 }

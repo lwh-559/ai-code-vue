@@ -1,7 +1,7 @@
 declare namespace API {
   type adminGetAppVOParams = {
     /** 应用 id */
-    id: string
+    id: number
   }
 
   type AppAddRequest = {
@@ -13,7 +13,7 @@ declare namespace API {
 
   type AppAdminUpdateRequest = {
     /** 应用 id */
-    id: string
+    id: number
     /** 应用名称 */
     appName?: string
     /** 应用封面 URL */
@@ -24,7 +24,7 @@ declare namespace API {
 
   type AppDeployRequest = {
     /** 应用 ID */
-    appId: string
+    appId: number
   }
 
   type AppQueryRequest = {
@@ -37,7 +37,7 @@ declare namespace API {
     /** 排序顺序 */
     sortOrder?: 'ascend' | 'descend'
     /** 应用 id */
-    id?: string
+    id?: number
     /** 应用名称，支持模糊查询 */
     appName?: string
     /** 代码生成类型 */
@@ -52,13 +52,13 @@ declare namespace API {
 
   type AppUpdateRequest = {
     /** 应用 id */
-    id: string
+    id: number
     /** 应用名称 */
     appName?: string
   }
 
   type AppVO = {
-    id?: string
+    id?: number
     appName?: string
     cover?: string
     initPrompt?: string
@@ -92,13 +92,19 @@ declare namespace API {
 
   type BaseResponseLong = {
     code?: number
-    data?: string
+    data?: number
     message?: string
   }
 
   type BaseResponsePageAppVO = {
     code?: number
     data?: PageAppVO
+    message?: string
+  }
+
+  type BaseResponsePageChatHistory = {
+    code?: number
+    data?: PageChatHistory
     message?: string
   }
 
@@ -126,20 +132,48 @@ declare namespace API {
     message?: string
   }
 
+  type ChatHistory = {
+    id?: number
+    message?: string
+    messageType?: string
+    appId?: number
+    userId?: number
+    createTime?: string
+    updateTime?: string
+    isDelete?: number
+  }
+
+  type ChatHistoryQueryRequest = {
+    /** 当前页号，从 1 开始 */
+    pageNum?: number
+    /** 每页数量，最大 20 */
+    pageSize?: number
+    /** 排序字段 */
+    sortField?: string
+    /** 排序顺序 */
+    sortOrder?: 'ascend' | 'descend'
+    id?: number
+    message?: string
+    messageType?: string
+    appId?: number
+    userId?: number
+    lastCreateTime?: string
+  }
+
   type chatToGenCodeParams = {
     /** 应用 ID */
-    appId: string
+    appId: number
     /** 用户提示词 */
     message: string
   }
 
   type DeleteRequest = {
-    id?: string
+    id?: number
   }
 
   type getAppVOByIdParams = {
     /** 应用 id */
-    id: string
+    id: number
   }
 
   type getUserByIdParams = {
@@ -150,6 +184,15 @@ declare namespace API {
   type getUserVOByIdParams = {
     /** 用户 ID */
     id: number
+  }
+
+  type listAppChatHistoryParams = {
+    /** 应用ID */
+    appId: number
+    /** 页面大小 */
+    pageSize?: number
+    /** 最后一条记录的创建时间，用于游标分页 */
+    lastCreateTime?: string
   }
 
   type LoginUserVO = {
@@ -165,6 +208,15 @@ declare namespace API {
 
   type PageAppVO = {
     records?: AppVO[]
+    pageNumber?: number
+    pageSize?: number
+    totalPage?: number
+    totalRow?: number
+    optimizeCountQuery?: boolean
+  }
+
+  type PageChatHistory = {
+    records?: ChatHistory[]
     pageNumber?: number
     pageSize?: number
     totalPage?: number
