@@ -15,9 +15,15 @@ export const CODE_GEN_TYPE = {
     shortLabel: '多文件',
     color: 'green',
   },
+  VUE_PROJECT: {
+    label: 'Vue 项目模式',
+    value: 'vue_project',
+    shortLabel: 'Vue',
+    color: 'orange',
+  },
 } as const
 
-export type CodeGenTypeValue = typeof CODE_GEN_TYPE[keyof typeof CODE_GEN_TYPE]['value']
+export type CodeGenTypeValue = (typeof CODE_GEN_TYPE)[keyof typeof CODE_GEN_TYPE]['value']
 
 /**
  * 根据值获取类型配置
