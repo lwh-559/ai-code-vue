@@ -8,12 +8,16 @@ import {
   LoadingOutlined,
   RocketOutlined,
   InfoCircleOutlined,
+  DownloadOutlined,
+  TagOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
 import { chatToGenCode } from '@/utils/sseRequest'
 import { useLoginUserStore } from '@/stores/loginUser'
 import { getStaticPreviewUrl } from '@/utils/url'
+import { downloadAppCodeZip } from '@/utils/downloadAppCode'
+import { CODE_GEN_TYPE, getCodeGenTypeLabel, getCodeGenTypeColor } from '@/constants/codegen'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -75,6 +79,10 @@ const previewUrl = ref('')
 
 // ========== 部署相关 ==========
 const deploying = ref(false)
+
+// ========== 下载相关 ==========
+const downloading = ref(false)
+const detailPopoverVisible = ref(false)
 
 /**
  * 滚动到底部
@@ -278,6 +286,9 @@ const initPreviewStatus = async () => {
  * 删除应用
  */
 const handleDelete = () => {
+  // 关闭 Popover
+  detailPopoverVisible.value = false
+
   Modal.confirm({
     title: '确认删除',
     content: `确定要删除应用「${appInfo.value.appName}」吗？删除后无法恢复。`,
@@ -335,6 +346,21 @@ const handleDeploy = async () => {
 }
 
 /**
+ * 下载应用代码
+ */
+const handleDownloadCode = async () => {
+  downloading.value = true
+  try {
+    await downloadAppCodeZip({ appId: Number(appId.value) })
+    message.success('代码下载成功')
+  } catch (error) {
+    message.error('下载失败，请稍后重试')
+  } finally {
+    downloading.value = false
+  }
+}
+
+/**
  * 返回主页
  */
 const goBack = () => {
@@ -377,10 +403,21 @@ onUnmounted(() => {
           <template #icon><ArrowLeftOutlined /></template>
         </a-button>
         <span class="app-name">{{ appInfo.appName || '应用生成中...' }}</span>
+        <a-tag
+          v-if="appInfo.codeGenType"
+          :class="['gen-type-tag', `gen-type-${getCodeGenTypeColor(appInfo.codeGenType)}`]"
+        >
+          <template #icon><TagOutlined /></template>
+          {{ getCodeGenTypeLabel(appInfo.codeGenType) }}
+        </a-tag>
       </div>
       <div class="header-right">
         <!-- 应用详情按钮 -->
-        <a-popover placement="bottomRight" trigger="click">
+        <a-popover
+          v-model:visible="detailPopoverVisible"
+          placement="bottomRight"
+          trigger="click"
+        >
           <template #content>
             <AppDetailPopover
               :app="appInfo"
@@ -394,6 +431,14 @@ onUnmounted(() => {
             应用详情
           </a-button>
         </a-popover>
+
+        <a-button
+          :loading="downloading"
+          @click="handleDownloadCode"
+        >
+          <template #icon><DownloadOutlined /></template>
+          下载代码
+        </a-button>
 
         <a-button
           type="primary"
@@ -528,6 +573,31 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 500;
   color: #1a1a1a;
+}
+
+.gen-type-tag {
+  font-size: 12px;
+  font-weight: normal;
+  border-radius: 12px;
+  margin-left: 8px;
+}
+
+.gen-type-blue {
+  background-color: #e6f7ff;
+  color: #1890ff;
+  border-color: #91d5ff;
+}
+
+.gen-type-green {
+  background-color: #f6ffed;
+  color: #52c41a;
+  border-color: #b7eb8f;
+}
+
+.gen-type-orange {
+  background-color: #fff7e6;
+  color: #fa8c16;
+  border-color: #ffd591;
 }
 
 .header-right {

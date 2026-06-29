@@ -110,6 +110,20 @@ export async function deployApp(body: API.AppDeployRequest, options?: { [key: st
   })
 }
 
+/** 下载应用代码 根据 AppId 下载应用代码 GET /app/download/${param0} */
+export async function downloadAppCode(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.downloadAppCodeParams,
+  options?: { [key: string]: any }
+) {
+  const { appId: param0, ...queryParams } = params
+  return request<any>(`/app/download/${param0}`, {
+    method: 'GET',
+    params: { ...queryParams },
+    ...(options || {}),
+  })
+}
+
 /** 分页查询精选应用 分页查询精选应用列表，无需登录 POST /app/featured/list */
 export async function listFeaturedAppByPage(
   body: API.AppQueryRequest,

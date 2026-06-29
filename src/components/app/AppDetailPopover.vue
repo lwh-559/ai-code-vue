@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { UserOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import { getDeployUrl } from '@/utils/url'
+import { getCodeGenTypeLabel, getCodeGenTypeColor } from '@/constants/codegen'
 
 interface Props {
   app: API.AppVO
@@ -27,8 +28,8 @@ const emit = defineEmits<{
         </div>
         <div class="detail-item">
           <span class="item-label">生成类型：</span>
-          <a-tag :color="app.codeGenType === 'html' ? 'blue' : 'green'" size="small">
-            {{ app.codeGenType === 'html' ? 'HTML' : '多文件' }}
+          <a-tag :color="getCodeGenTypeColor(app.codeGenType)" size="small">
+            {{ getCodeGenTypeLabel(app.codeGenType) }}
           </a-tag>
         </div>
         <div class="detail-item" v-if="app.cover">

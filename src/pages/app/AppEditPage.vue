@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons-vue'
 import { getAppVoById, updateApp, adminUpdateApp } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
+import { getCodeGenTypeLabel, getCodeGenTypeColor } from '@/constants/codegen'
 
 const router = useRouter()
 const route = useRoute()
@@ -155,11 +156,9 @@ onMounted(() => {
 
           <!-- 以下字段全部只读，不可修改 -->
           <a-form-item label="代码生成类型">
-            <a-input
-              :value="appInfo.codeGenType === 'html' ? 'HTML 单文件' : '多文件应用'"
-              disabled
-              class="field-disabled"
-            />
+            <a-tag class="field-disabled">
+              {{ getCodeGenTypeLabel(appInfo.codeGenType) }}
+            </a-tag>
           </a-form-item>
 
           <a-form-item label="初始化提示词">
