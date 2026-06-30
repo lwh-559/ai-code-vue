@@ -22,8 +22,8 @@ export function chatToGenCode(
   const controller = new AbortController()
   const { signal } = controller
 
-  const baseUrl = import.meta.env.VITE_APP_API_BASE_URL
-  const url = new URL(`${baseUrl}/app/chat/gen/code`)
+  const baseUrl = import.meta.env.VITE_APP_API_BASE_URL || '/api'
+  const url = new URL(`${baseUrl}/app/chat/gen/code`, window.location.origin)
   url.searchParams.set('appId', String(appId))
   url.searchParams.set('message', message)
 

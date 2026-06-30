@@ -10,6 +10,8 @@ import {
   InfoCircleOutlined,
   DownloadOutlined,
   TagOutlined,
+  EditOutlined,
+  CloseOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
@@ -23,6 +25,7 @@ import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import AppDetailPopover from '@/components/app/AppDetailPopover.vue'
+import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
 
 // 配置 marked：GFM + 换行 + 代码高亮
 marked.use(
@@ -83,6 +86,12 @@ const deploying = ref(false)
 // ========== 下载相关 ==========
 const downloading = ref(false)
 const detailPopoverVisible = ref(false)
+
+// ========== 可视化编辑相关 ==========
+const isEditMode = ref(false)
+const selectedElement = ref<ElementInfo | null>(null)
+const previewIframeRef = ref<HTMLIFrameElement>()
+let visualEditor: VisualEditor | null = null
 
 /**
  * 滚动到底部
@@ -181,8 +190,32 @@ const sendMessage = async (text?: string) => {
   const msg = (text || userInput.value).trim()
   if (!msg || sending.value) return
 
+  // 如果有选中的元素，将元素信息添加到提示词中
+  let finalMessage = msg
+  if (selectedElement.value) {
+    const elementInfo = selectedElement.value
+    const elementContext = `
+\n\n选中元素信息：
+- 标签: ${elementInfo.tagName}
+- ID: ${elementInfo.id || '无'}
+- 类名: ${elementInfo.className || '无'}
+- 选择器: ${elementInfo.selector}
+- 页面路径: ${elementInfo.pagePath || '无'}
+- 文本内容: ${elementInfo.textContent || '无'}
+- 位置: top=${Math.round(elementInfo.rect.top)}, left=${Math.round(elementInfo.rect.left)}, width=${Math.round(elementInfo.rect.width)}, height=${Math.round(elementInfo.rect.height)}
+`
+    finalMessage = msg + elementContext
+  }
+
+  // 如果在编辑模式且有选中元素，清除选中并退出编辑模式
+  if (isEditMode.value && selectedElement.value) {
+    clearSelectedElement()
+    isEditMode.value = false
+    visualEditor?.disableEditMode()
+  }
+
   // 添加用户消息
-  messages.value.push({ role: 'user', content: msg })
+  messages.value.push({ role: 'user', content: finalMessage })
   userInput.value = ''
   scrollToBottom()
 
@@ -194,7 +227,7 @@ const sendMessage = async (text?: string) => {
   // 调用 SSE 接口
   sseController.value = chatToGenCode(
     appId.value,
-    msg,
+    finalMessage,
     // onMessage
     (data: string) => {
       const lastMsg = messages.value[messages.value.length - 1]
@@ -259,6 +292,10 @@ const tryLoadPreview = async (retryCount = 0) => {
   if (available) {
     previewUrl.value = url
     previewStatus.value = 'preview_ready'
+    // 预览加载完成后初始化可视化编辑器
+    nextTick(() => {
+      initVisualEditor()
+    })
   } else if (retryCount < MAX_RETRY) {
     // 1秒后重试
     setTimeout(() => {
@@ -280,6 +317,58 @@ const initPreviewStatus = async () => {
   }
   // 有对话历史，检查预览资源是否存在
   await tryLoadPreview()
+}
+
+/**
+ * 切换编辑模式
+ */
+const toggleEditMode = () => {
+  isEditMode.value = !isEditMode.value
+  if (!visualEditor) {
+    return
+  }
+  if (isEditMode.value) {
+    visualEditor.enableEditMode()
+  } else {
+    visualEditor.disableEditMode()
+  }
+}
+
+/**
+ * 清除选中元素
+ */
+const clearSelectedElement = () => {
+  selectedElement.value = null
+  visualEditor?.clearSelection()
+}
+
+/**
+ * 初始化 VisualEditor
+ */
+const initVisualEditor = () => {
+  if (!previewIframeRef.value) return
+
+  visualEditor = new VisualEditor({
+    onElementSelected: (elementInfo) => {
+      selectedElement.value = elementInfo
+    },
+  })
+
+  visualEditor.init(previewIframeRef.value)
+}
+
+/**
+ * 处理 iframe 消息
+ */
+const handleIframeMessage = (event: MessageEvent) => {
+  visualEditor?.handleIframeMessage(event)
+}
+
+/**
+ * 处理 iframe 加载完成
+ */
+const handleIframeLoad = () => {
+  visualEditor?.onIframeLoad()
 }
 
 /**
@@ -386,11 +475,25 @@ onMounted(async () => {
   if (isOwner.value && messages.value.length === 0 && appInfo.value.initPrompt) {
     await sendMessage(appInfo.value.initPrompt)
   }
+
+  // 初始化可视化编辑器
+  nextTick(() => {
+    initVisualEditor()
+  })
+
+  // 监听 iframe 消息
+  window.addEventListener('message', handleIframeMessage)
 })
 
 onUnmounted(() => {
   // 取消进行中的 SSE 请求
   sseController.value?.abort()
+  // 移除 iframe 消息监听
+  window.removeEventListener('message', handleIframeMessage)
+  // 清理可视化编辑器
+  if (visualEditor) {
+    visualEditor.disableEditMode()
+  }
 })
 </script>
 
@@ -495,24 +598,56 @@ onUnmounted(() => {
 
         <!-- 输入区域 -->
         <div class="input-area">
-          <a-tooltip :title="!isOwner ? '无法在别人的作品下对话哦~' : ''" :disabled="isOwner">
-            <a-input-search
-              v-model:value="userInput"
-              :placeholder="isOwner ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'"
-              enter-button
-              :loading="sending"
+          <!-- 选中元素信息显示 -->
+          <a-alert
+            v-if="selectedElement"
+            type="info"
+            closable
+            @close="clearSelectedElement"
+            class="selected-element-alert"
+          >
+            <template #message>
+              <span class="element-info-title">已选中元素：</span>
+              <span class="element-info-content">{{ selectedElement.tagName }}</span>
+              <span v-if="selectedElement.id" class="element-info-content">#{{ selectedElement.id }}</span>
+              <span v-if="selectedElement.className" class="element-info-content">.{{ selectedElement.className.split(' ')[0] }}</span>
+              <span v-if="selectedElement.textContent" class="element-info-text">「{{ selectedElement.textContent }}」</span>
+            </template>
+          </a-alert>
+
+          <div class="input-wrapper">
+            <!-- 编辑模式按钮 -->
+            <a-button
+              v-if="previewStatus === 'preview_ready'"
+              :type="isEditMode ? 'primary' : 'default'"
               :disabled="!isOwner"
-              size="large"
-              class="chat-input"
-              @search="isOwner && sendMessage()"
+              @click="toggleEditMode"
+              class="edit-mode-btn"
             >
-              <template #enterButton>
-                <a-button type="primary" :disabled="sending || !isOwner">
-                  <template #icon><SendOutlined /></template>
-                </a-button>
-              </template>
-            </a-input-search>
-          </a-tooltip>
+              <template #icon><EditOutlined /></template>
+              {{ isEditMode ? '退出编辑' : '编辑模式' }}
+            </a-button>
+
+            <a-tooltip :title="!isOwner ? '无法在别人的作品下对话哦~' : ''" :disabled="isOwner">
+              <a-input-search
+                v-model:value="userInput"
+                :placeholder="isOwner ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'"
+                enter-button
+                :loading="sending"
+                :disabled="!isOwner"
+                size="large"
+                class="chat-input"
+                @search="isOwner && sendMessage()"
+              >
+                <template #enterButton>
+                  <a-button type="primary" :disabled="sending || !isOwner">
+                    <template #icon><SendOutlined /></template>
+                  </a-button>
+                </template>
+              </a-input-search>
+            </a-tooltip>
+          </div>
+
           <div v-if="isOwner" class="input-tip">按 Enter 发送，Ctrl+Enter 换行</div>
           <div v-else class="input-tip input-tip-warning">只有作品作者才能进行对话</div>
         </div>
@@ -523,9 +658,11 @@ onUnmounted(() => {
         <!-- 预览就绪：显示 iframe -->
         <div v-if="previewStatus === 'preview_ready' && previewUrl" class="preview-container">
           <iframe
+            ref="previewIframeRef"
             :src="previewUrl"
             class="preview-iframe"
             sandbox="allow-scripts allow-same-origin"
+            @load="handleIframeLoad"
           />
         </div>
         <!-- 预览失败 -->
@@ -769,6 +906,56 @@ onUnmounted(() => {
   padding: 8px 12px;
   background: #fff;
   border-top: 1px solid #e8e8e8;
+}
+
+/* 选中元素 Alert 样式 */
+.selected-element-alert {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.element-info-title {
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.element-info-content {
+  font-weight: 600;
+  color: #1890ff;
+  margin-right: 4px;
+  font-family: 'Courier New', monospace;
+}
+
+.element-info-text {
+  color: #666;
+  font-style: italic;
+}
+
+/* 输入包装器 */
+.input-wrapper {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 编辑模式按钮 */
+.edit-mode-btn {
+  flex-shrink: 0;
+}
+
+.edit-mode-btn.ant-btn-primary {
+  background: #52c41a;
+  border-color: #52c41a;
+}
+
+.edit-mode-btn.ant-btn-primary:hover,
+.edit-mode-btn.ant-btn-primary:focus {
+  background: #73d13d;
+  border-color: #73d13d;
+}
+
+.chat-input {
+  flex: 1;
 }
 
 .chat-input :deep(.ant-input-search-button) {
