@@ -255,10 +255,12 @@ const sendMessage = async (text?: string) => {
       // 将错误信息显示在对话框中
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant') {
-        lastMsg.content = `❌ 错误：${error.message}`
+        lastMsg.content = `❌ ${error.message}`
       } else {
-        messages.value.push({ role: 'assistant', content: `❌ 错误：${error.message}` })
+        messages.value.push({ role: 'assistant', content: `❌ ${error.message}` })
       }
+      // 弹出错误提示（如限流提醒等）
+      message.error(error.message)
       scrollToBottom()
     },
   )
@@ -535,6 +537,18 @@ onUnmounted(() => {
           </a-button>
         </a-popover>
 
+        <!-- 编辑模式按钮 -->
+        <a-button
+          v-if="previewStatus === 'preview_ready'"
+          :type="isEditMode ? 'primary' : 'default'"
+          :disabled="!isOwner"
+          @click="toggleEditMode"
+          class="edit-mode-btn"
+        >
+          <template #icon><EditOutlined /></template>
+          {{ isEditMode ? '退出编辑' : '编辑模式' }}
+        </a-button>
+
         <a-button
           :loading="downloading"
           @click="handleDownloadCode"
@@ -616,18 +630,6 @@ onUnmounted(() => {
           </a-alert>
 
           <div class="input-wrapper">
-            <!-- 编辑模式按钮 -->
-            <a-button
-              v-if="previewStatus === 'preview_ready'"
-              :type="isEditMode ? 'primary' : 'default'"
-              :disabled="!isOwner"
-              @click="toggleEditMode"
-              class="edit-mode-btn"
-            >
-              <template #icon><EditOutlined /></template>
-              {{ isEditMode ? '退出编辑' : '编辑模式' }}
-            </a-button>
-
             <a-tooltip :title="!isOwner ? '无法在别人的作品下对话哦~' : ''" :disabled="isOwner">
               <a-input-search
                 v-model:value="userInput"

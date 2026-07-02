@@ -21,6 +21,7 @@ export function chatToGenCode(
 ): AbortController {
   const controller = new AbortController()
   const { signal } = controller
+  let streamCompleted = false
 
   const baseUrl = import.meta.env.VITE_APP_API_BASE_URL || '/api'
   const url = new URL(`${baseUrl}/app/chat/gen/code`, window.location.origin)
@@ -56,8 +57,10 @@ export function chatToGenCode(
       let buffer = ''
 
       while (true) {
+        if (streamCompleted) break
         const { done, value } = await reader.read()
         if (done) {
+          if (streamCompleted) break
           onDone()
           break
         }
@@ -82,8 +85,21 @@ export function chatToGenCode(
             }
           }
 
+          // 处理 business-error 事件（后端限流等业务错误）
+          if (eventType === 'business-error') {
+            streamCompleted = true
+            try {
+              const errorData = JSON.parse(eventData)
+              onError(new Error(errorData.message || '生成过程中出现错误'))
+            } catch {
+              onError(new Error('服务器返回错误'))
+            }
+            return
+          }
+
           // 处理结束事件
           if (eventType === 'done') {
+            if (streamCompleted) return
             onDone()
             return
           }
@@ -112,7 +128,7 @@ export function chatToGenCode(
       }
     })
     .catch((error) => {
-      if (error.name !== 'AbortError') {
+      if (error.name !== 'AbortError' && !streamCompleted) {
         onError(error)
       }
     })
